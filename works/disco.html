@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>كرة ديسكو · Ayar ∞</title>
+<style>html,body{margin:0;height:100%;background:transparent}body{display:grid;place-items:center;overflow:hidden}.discomark{width:min(80vw,78vh,560px)}.discomark canvas{width:100%;height:auto;display:block}</style></head><body>
+<div class="discomark" aria-hidden="true">
+    <canvas id="disco" width="860" height="980"></canvas>
+  </div>
+  <script>
+  (function () {
+    var cv = document.getElementById('disco'); if (!cv || !cv.getContext) return;
+    var g = cv.getContext('2d'), W = cv.width, H = cv.height;
+    var R = 300, CX = W / 2, CY = 560;                       // نصف القطر والمركز (الخيط يتدلّى من الأعلى)
+    // 📐 [2026-11-02 «غيّر الزاوية… من منظور ألطف»] كانت تُرى من تحتها ⇒ صارت من فوقها قليلاً فيظهر
+    //    القطب العلوي ومربط الخيط، ومحورها مائل قليلاً، وبمنظور حقيقي (الأقرب أكبر) بدل الإسقاط المسطّح.
+    var TILT = 0.42;                                           // من الأعلى: يظهر القطب العلوي
+    var ROLL = 0.2;                                            // ميلان المحور (~١١°)
+    var D = 3.4;                                               // بُعد الكاميرا بأنصاف الأقطار (منظور)
+    var RS = R * D / Math.sqrt(D * D - 1);                     // نصف قطر الظلّ الكروي على الشاشة
+    function proj(p) { var s = D / (D - p[2]); return [CX + p[0] * R * s, CY - p[1] * R * s]; }
+    var L = norm([-0.55, 0.62, 0.75]), V = [0, 0, 1];          // الضوء من أعلى اليسار
+    var Hh = norm([L[0] + V[0], L[1] + V[1], L[2] + V[2]]);
+    function norm(v) { var m = Math.hypot(v[0], v[1], v[2]); return [v[0] / m, v[1] / m, v[2] / m]; }
+    function rnd(s) { var x = Math.sin(s * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); }
+
+    // شبكة المربّعات: أحزمة عرض، وعدد المربّعات في كل حزام يتناسب مع محيطه.
+    var tiles = [], BANDS = 20;
+    for (var b = 0; b < BANDS; b++) {
+      var la0 = -Math.PI / 2 + Math.PI * b / BANDS, la1 = -Math.PI / 2 + Math.PI * (b + 1) / BANDS;
+      var n = Math.max(6, Math.round(44 * Math.cos((la0 + la1) / 2)));
+      for (var k = 0; k < n; k++) {
+        tiles.push({ la0: la0, la1: la1, lo0: 2 * Math.PI * k / n, lo1: 2 * Math.PI * (k + 1) / n,
+          base: 0.30 + 0.30 * rnd(tiles.length + 1), ph: rnd(tiles.length + 7) * 6.283, gold: false });
+      }
+    }
+    // 🏷️ [2026-11-02 «شيل الكتابة… بس لون ٣ مربعات بشكل هوية كل فرع… وحطها كملصق فوق الكرة»]
+    //    ثلاثة ملصقات مربّعة ثابتة على وجه الكرة (لا تدور معها) — بلا أي نصّ، لونُ كلٍّ من هوية فرعه
+    //    (الملف التعريفي): الحلقة = ذهبي SUNRAY · Go = برتقالي شروق جاكس · Grove = أخضر السيقان بلمسة أصفر الوردة.
+    //    [«خل الملصقات تكون لاصقة بالكورة وتمشي»] ⇒ مثبّتة على سطح الكرة (عرض/طول) وتدور معها
+    //    وتختفي خلفها. موزّعة بالتساوي (كل ١٢٠°) ⇒ ملصقٌ واحد على الأقلّ ظاهرٌ طوال الدوران
+    //    (المتقاربة تركت ثلث الدورة بلا أي ملصق).
+    //    la/lo بالراديان · h نصف ضلع الملصق بالراديان · tw ميلان الملصق على السطح.
+    var STICKERS = [
+      { la: 0.26, lo: 0.000, h: 0.19, tw: -0.12, fill: '#f9a8d4', glow: 'rgba(249,168,212,.65)' },             
+      { la: -0.10, lo: 2.094, h: 0.19, tw: 0.10, fill: '#a78bfa', glow: 'rgba(167,139,250,.6)' },             
+      { la: 0.18, lo: 4.189, h: 0.19, tw: -0.05, fill: '#7dd3fc', glow: 'rgba(125,211,252,.6)' }, 
+    ];
+    // 📏 [«خلها بنفس حجم المربعات اللي بالكرة»] الملصق = مرآةٌ واحدة تماماً: يُثبَّت على مركز أقرب مرآة،
+    //    بلا ميلان، وحجمه الكلّي (بالإطار الأبيض) = حجم المرآة بعد فاصلها (نصف حزام العرض × 0.86).
+    var TILE_H = (Math.PI / BANDS) / 2 * 0.86, BORDER = 0.006;   // إطار رفيع كي يبقى لون الفرع غالباً
+    STICKERS.forEach(function (S) {
+      var best = null, bd = 1e9;
+      tiles.forEach(function (t) {
+        var cl = (t.la0 + t.la1) / 2, cg = (t.lo0 + t.lo1) / 2;
+        var d = Math.abs(cl - S.la) + Math.abs(cg - S.lo) * Math.cos(cl);
+        if (d < bd) { bd = d; best = t; }
+      });
+      if (best) {
+        S.la = (best.la0 + best.la1) / 2; S.lo = (best.lo0 + best.lo1) / 2; S.tw = 0;
+        S.hLo = (best.lo1 - best.lo0) / 2 * 0.86;              // نصف عرض المرآة بالطول (يتبع حزامها)
+      }
+      S.h = TILE_H - BORDER;
+    });
+    // نقطة على السطح بإزاحة (u,v) راديان حول مركز الملصق مع ميلانه
+    function spt(S, u, v, a) {
+      var cu = Math.cos(S.tw), su = Math.sin(S.tw);
+      // عرض الملصق بالطول = عرض مرآة حزامه نفسه (hLo) ⇒ يطابق المرايا المجاورة تماماً
+      var lonScale = S.hLo ? S.hLo / TILE_H : 1 / Math.max(0.3, Math.cos(S.la));
+      return pt(S.la + (u * su + v * cu), S.lo + (u * cu - v * su) * lonScale, a);
+    }
+    function quad(S, h, a, inset) {
+      var k = h - (inset || 0);
+      return [spt(S, -k, -k, a), spt(S, k, -k, a), spt(S, k, k, a), spt(S, -k, k, a)];
+    }
+    function pathOf(P) { g.beginPath(); for (var j = 0; j < P.length; j++) { var Q = proj(P[j]); j ? g.lineTo(Q[0], Q[1]) : g.moveTo(Q[0], Q[1]); } g.closePath(); }
+
+    function pt(la, lo, a) {
+      var x = Math.cos(la) * Math.sin(lo + a), y = Math.sin(la), z = Math.cos(la) * Math.cos(lo + a);
+      var y2 = y * Math.cos(TILT) - z * Math.sin(TILT), z2 = y * Math.sin(TILT) + z * Math.cos(TILT);
+      return [x * Math.cos(ROLL) - y2 * Math.sin(ROLL), x * Math.sin(ROLL) + y2 * Math.cos(ROLL), z2];
+    }
+    function frame(t) {
+      var a = t * 0.00022;                                    // دورة كاملة كل ~٢٨ ثانية
+      g.clearRect(0, 0, W, H);
+      // الهالة الخلفية
+      var halo = g.createRadialGradient(CX, CY, RS * 0.6, CX, CY, RS * 1.45);
+      halo.addColorStop(0, 'rgba(196,181,253,.12)'); halo.addColorStop(1, 'rgba(196,181,253,0)');
+      g.fillStyle = halo; g.beginPath(); g.arc(CX, CY, RS * 1.45, 0, 6.283); g.fill();
+      // ☀️ [2026-11-02 «خلها افتح… بنفس النمط الزجاجي المشرق»] القاعدة فاتحة (فواصل رمادية ناعمة)
+      //    بظلّ حبريّ خفيف كبطاقات النمط — كانت فحمية #2a2b2e.
+      g.save();
+      g.shadowColor = 'rgba(67,67,68,.16)'; g.shadowBlur = 48; g.shadowOffsetY = 18;
+      g.fillStyle = '#d6d9de'; g.beginPath(); g.arc(CX, CY, RS + 2, 0, 6.283); g.fill();
+      g.restore();
+
+      var golds = [], sparks = [];
+      for (var i = 0; i < tiles.length; i++) {
+        var T = tiles[i], dl = (T.la1 - T.la0) * 0.07, dg = (T.lo1 - T.lo0) * 0.07;
+        var c = pt((T.la0 + T.la1) / 2, (T.lo0 + T.lo1) / 2, a);
+        if (c[2] <= 1 / D + 0.02) continue;                    // الوجه الخلفي (بالمنظور: الأفق قبل z=0)
+        var P = [pt(T.la0 + dl, T.lo0 + dg, a), pt(T.la0 + dl, T.lo1 - dg, a), pt(T.la1 - dl, T.lo1 - dg, a), pt(T.la1 - dl, T.lo0 + dg, a)];
+        var dif = Math.max(0, c[0] * L[0] + c[1] * L[1] + c[2] * L[2]);
+        var spec = Math.pow(Math.max(0, c[0] * Hh[0] + c[1] * Hh[1] + c[2] * Hh[2]), 38);
+        var shimmer = 0.06 * Math.sin(t * 0.004 + T.ph);      // لمعان المرايا يرتعش قليلاً
+        // درجاتٌ فاتحة (≈ 0.66–1): زجاجٌ مشرق لا مرايا داكنة، والحوافّ تخفت قليلاً فقط.
+        var v = 0.60 + T.base * 0.22 + dif * 0.20 + spec * 0.55 + shimmer * 0.6;
+        v *= 0.86 + 0.14 * c[2];
+        g.beginPath();
+        for (var j = 0; j < 4; j++) { var Q = proj(P[j]); j ? g.lineTo(Q[0], Q[1]) : g.moveTo(Q[0], Q[1]); }
+        g.closePath();
+        if (T.gold) { golds.push({ path: P, c: c }); continue; }
+        var gv = Math.round(Math.min(1, Math.max(0, v)) * 255);
+        g.fillStyle = 'rgb(' + gv + ',' + Math.min(255, gv + 1) + ',' + Math.min(255, gv + 4) + ')';
+        g.fill();
+        if (spec > 0.55 && Math.sin(t * 0.003 + T.ph * 3) > 0.6) { var Sp = proj(c); sparks.push([Sp[0], Sp[1], spec]); }
+      }
+      // 🏷️ ملصقات الفروع لاصقة بالكرة: تدور معها وتنحني على سطحها وتختفي خلفها.
+      STICKERS.forEach(function (S) {
+        var c = pt(S.la, S.lo, a);
+        if (c[2] <= 1 / D + 0.06) return;                      // خلف الكرة الآن
+        var face = Math.min(1, (c[2] - 1 / D) / 0.55);
+        var Cp = proj(c), gr = (58 + 62 * face);               // [«قوّي التوهج»] هالة أوسع حول الملصق الصغير
+        g.save();
+        var gl2 = g.createRadialGradient(Cp[0], Cp[1], 0, Cp[0], Cp[1], gr);
+        gl2.addColorStop(0, S.glow.replace(/[\d.]+\)$/, (0.95 * face).toFixed(2) + ')')); gl2.addColorStop(0.35, S.glow.replace(/[\d.]+\)$/, (0.45 * face).toFixed(2) + ')')); gl2.addColorStop(1, 'rgba(255,255,255,0)');
+        g.fillStyle = gl2; g.beginPath(); g.arc(Cp[0], Cp[1], gr, 0, 6.283); g.fill();
+        g.shadowColor = 'rgba(67,67,68,' + (0.28 * face).toFixed(2) + ')'; g.shadowBlur = 5; g.shadowOffsetY = 2;
+        pathOf(quad(S, S.h + BORDER, a)); g.fillStyle = '#ffffff'; g.fill();        // إطار الملصق الأبيض
+        g.shadowColor = 'transparent';
+        pathOf(quad(S, S.h, a)); g.fillStyle = S.fill;                            // لون الفرع
+        g.shadowColor = S.fill; g.shadowBlur = 26 * face; g.fill(); g.fill();      // إشعاع (Emission) بلون الفرع
+        g.shadowColor = 'transparent';
+        if (S.accent) {                                                           // ركن بلون ثانٍ
+          var k = S.h, m = S.h * 0.45;
+          pathOf([spt(S, k - m, k, a), spt(S, k, k, a), spt(S, k, k - m, a)]); g.fillStyle = S.accent; g.fill();
+        }
+        var P = quad(S, S.h, a), A = proj(P[0]), B = proj(P[2]);                 // لمعة زجاجية مع الضوء
+        var sh = g.createLinearGradient(A[0], A[1], B[0], B[1]);
+        sh.addColorStop(0, 'rgba(255,255,255,' + (0.45 * face).toFixed(2) + ')'); sh.addColorStop(0.5, 'rgba(255,255,255,0)');
+        pathOf(P); g.fillStyle = sh; g.fill();
+        g.restore();
+      });
+      // لمعات بيضاء (نجوم رباعية) — بظلّ حبريّ رقيق كي تُرى فوق الكرة الفاتحة
+      g.save(); g.shadowColor = 'rgba(67,67,68,.35)'; g.shadowBlur = 6;
+      sparks.forEach(function (s) {
+        var r = 16 + 22 * s[2];
+        g.strokeStyle = 'rgba(255,255,255,1)'; g.lineWidth = 3;
+        g.beginPath(); g.moveTo(s[0] - r, s[1]); g.lineTo(s[0] + r, s[1]); g.moveTo(s[0], s[1] - r); g.lineTo(s[0], s[1] + r); g.stroke();
+      });
+      g.restore();
+      // لمعة زجاجية عامّة أعلى اليسار
+      var gl = g.createRadialGradient(CX - RS * 0.38, CY - RS * 0.42, 0, CX - RS * 0.38, CY - RS * 0.42, RS * 0.7);
+      gl.addColorStop(0, 'rgba(255,255,255,.28)'); gl.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = gl; g.beginPath(); g.arc(CX, CY, RS, 0, 6.283); g.fill();
+      // حافّة زجاجية: خطّ أبيض داخلي + حدّ حبريّ رقيق (rgba(67,67,68,.12) كبطاقات النمط)
+      g.lineWidth = 6; g.strokeStyle = 'rgba(255,255,255,.75)'; g.beginPath(); g.arc(CX, CY, RS - 3, 0, 6.283); g.stroke();
+      g.lineWidth = 2; g.strokeStyle = 'rgba(67,67,68,.14)'; g.beginPath(); g.arc(CX, CY, RS + 1, 0, 6.283); g.stroke();
+      // الخيط يُربط بالقطب العلوي (ظاهرٌ من هذه الزاوية) + حلقة تعليق صغيرة
+      var top = proj(pt(Math.PI / 2, 0, 0));
+      g.strokeStyle = 'rgba(67,67,68,.6)'; g.lineWidth = 3;
+      g.beginPath(); g.moveTo(top[0], 0); g.lineTo(top[0], top[1]); g.stroke();
+      g.fillStyle = '#9a9da2'; g.beginPath(); g.ellipse(top[0], top[1], 16, 8, ROLL, 0, 6.283); g.fill();
+      g.fillStyle = 'rgba(255,255,255,.35)'; g.beginPath(); g.ellipse(top[0] - 4, top[1] - 2, 6, 3, ROLL, 0, 6.283); g.fill();
+    }
+    var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (still) { frame(4200); return; }
+    (function loop(t) { frame(t || 0); requestAnimationFrame(loop); })();
+  })();
+  </script>
+</body></html>
